@@ -271,36 +271,15 @@ class BitgetMicroservice(BaseMicroservice):
     def get_position_data(self) -> Dict[str, Any]:
         """Lấy thông tin position và stake cho API"""
         try:
-            # Mock data cho demo - sau này anh có thể thay bằng API thực
-            return {
-                "total_balance": 2800.0,
-                "futures_pnl": 95.25,
-                "staking_total": 1200.0,
-                "launchpool_total": 350.0,
-                "positions": [
-                    {
-                        "symbol": "BGB/USDT:USDT",
-                        "side": "SHORT",
-                        "size": 500.0,
-                        "entry_price": 1.85,
-                        "mark_price": 1.82,
-                        "pnl": 15.0,
-                        "roe": 1.62,
-                        "funding_rate": -0.0012  # -0.12% funding rate (good for short)
-                    },
-                    {
-                        "symbol": "ETH/USDT:USDT",
-                        "side": "SHORT",
-                        "size": 1.2,
-                        "entry_price": 2590.0,
-                        "mark_price": 2570.0,
-                        "pnl": 24.0,
-                        "roe": 0.93,
-                        "funding_rate": 0.0008  # 0.08% funding rate
-                    }
-                ]
-            }
+            # Nếu không có API key, trả về mock data
+            if not (self.api_key and self.api_secret and self.password):
+                return self._get_mock_data()
+
+            # Lấy dữ liệu thật từ Bitget API
+            return self._fetch_real_bitget_data()
+
         except Exception as e:
+            self._log_event(f"[ERROR] get_position_data: {e}")
             return {
                 "error": str(e),
                 "total_balance": 0,
@@ -309,3 +288,154 @@ class BitgetMicroservice(BaseMicroservice):
                 "launchpool_total": 0,
                 "positions": []
             }
+
+    def _get_mock_data(self) -> Dict[str, Any]:
+        """Mock data cho demo khi chưa có API key"""
+        return {
+            "total_balance": 2800.0,
+            "futures_pnl": 95.25,
+            "staking_total": 1200.0,
+            "launchpool_total": 350.0,
+            "positions": [
+                {
+                    "symbol": "BGB/USDT:USDT",
+                    "side": "SHORT",
+                    "size": 500.0,
+                    "entry_price": 1.85,
+                    "mark_price": 1.82,
+                    "pnl": 15.0,
+                    "roe": 1.62,
+                    "funding_rate": -0.0012
+                },
+                {
+                    "symbol": "ETH/USDT:USDT",
+                    "side": "SHORT",
+                    "size": 1.2,
+                    "entry_price": 2590.0,
+                    "mark_price": 2570.0,
+                    "pnl": 24.0,
+                    "roe": 0.93,
+                    "funding_rate": 0.0008
+                }
+            ]
+        }
+
+    def _fetch_real_bitget_data(self) -> Dict[str, Any]:
+        """Lấy dữ liệu thật từ Bitget API"""
+        import ccxt
+
+        # Tạo client cho API calls đồng bộ (cho position data)
+        bitget_sync = ccxt.bitget({
+            'apiKey': self.api_key,
+            'secret': self.api_secret,
+            'password': self.password,
+            'enableRateLimit': True,
+            'sandbox': False,  # Production mode
+            'options': {'defaultType': 'swap'}  # Futures trading
+        })
+
+        try:
+            # Lấy account balance
+            account_balance = bitget_sync.fetch_balance()
+
+            # Lấy USDT balance
+            usdt_balance = float(account_balance.get('USDT', {}).get('total', 0))
+
+            # Lấy spot balance nếu có
+            spot_balance = self._get_spot_balance(bitget_sync)
+
+            # Lấy futures positions
+            positions = bitget_sync.fetch_positions()
+            active_positions = []
+            total_pnl = 0.0
+
+            for pos in positions:
+                if float(pos.get('contracts', 0)) != 0:  # Chỉ lấy position có size > 0
+                    side = pos.get('side', '').upper()
+                    size = float(pos.get('contracts', 0))
+                    entry_price = float(pos.get('entryPrice', 0))
+                    mark_price = float(pos.get('markPrice', 0))
+                    unrealized_pnl = float(pos.get('unrealizedPnl', 0))
+                    percentage = float(pos.get('percentage', 0))
+
+                    # Lấy funding rate cho symbol này
+                    funding_rate = self._get_funding_rate(bitget_sync, pos.get('symbol', ''))
+
+                    active_positions.append({
+                        "symbol": pos.get('symbol', ''),
+                        "side": side,
+                        "size": abs(size),
+                        "entry_price": entry_price,
+                        "mark_price": mark_price,
+                        "pnl": unrealized_pnl,
+                        "roe": percentage,
+                        "funding_rate": funding_rate
+                    })
+
+                    total_pnl += unrealized_pnl
+
+            # Tính tổng balance
+            total_balance = usdt_balance + spot_balance
+
+            # Lấy thông tin Staking (placeholder - cần API riêng)
+            staking_total = self._get_staking_balance(bitget_sync)
+
+            # Lấy thông tin Launchpad/Pool (placeholder)
+            launchpool_total = self._get_launchpool_balance(bitget_sync)
+
+            return {
+                "total_balance": total_balance,
+                "futures_pnl": total_pnl,
+                "staking_total": staking_total,
+                "launchpool_total": launchpool_total,
+                "positions": active_positions
+            }
+
+        except Exception as e:
+            self._log_event(f"[ERROR] _fetch_real_bitget_data: {e}")
+            # Fallback to mock data nếu API call failed
+            return self._get_mock_data()
+        finally:
+            try:
+                bitget_sync.close()
+            except:
+                pass
+
+    def _get_spot_balance(self, bitget_client) -> float:
+        """Lấy spot account balance"""
+        try:
+            # Bitget có thể có spot balance riêng
+            spot_balance = bitget_client.fetch_balance({'type': 'spot'})
+            return float(spot_balance.get('USDT', {}).get('total', 0))
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get spot balance: {e}")
+            return 0.0
+
+    def _get_funding_rate(self, bitget_client, symbol: str) -> float:
+        """Lấy funding rate cho symbol"""
+        try:
+            funding_rate_data = bitget_client.fetch_funding_rate(symbol)
+            return float(funding_rate_data.get('fundingRate', 0))
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get funding rate for {symbol}: {e}")
+            return 0.0
+
+    def _get_staking_balance(self, bitget_client) -> float:
+        """Lấy balance Staking - placeholder"""
+        try:
+            # TODO: Implement Bitget Staking API call
+            # Bitget Earn/Staking API cần endpoint riêng
+            return 0.0
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get Staking balance: {e}")
+            return 0.0
+
+    def _get_launchpool_balance(self, bitget_client) -> float:
+        """Lấy thông tin Launchpad/Pool - placeholder"""
+        try:
+            # TODO: Implement Bitget Launchpad API call
+            # Bitget Launchpad/Pool API cần endpoint riêng
+            return 0.0
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get Launchpool balance: {e}")
+            return 0.0

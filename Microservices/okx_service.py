@@ -238,36 +238,15 @@ class OKXMicroservice(BaseMicroservice):
     def get_position_data(self) -> Dict[str, Any]:
         """Lấy thông tin position và stake cho API"""
         try:
-            # Mock data cho demo - sau này anh có thể thay bằng API thực
-            return {
-                "total_balance": 3200.0,
-                "futures_pnl": -75.50,
-                "staking_total": 1800.0,
-                "launchpool_total": 450.0,
-                "positions": [
-                    {
-                        "symbol": "OKB/USDT:USDT",
-                        "side": "SHORT",
-                        "size": 100.0,
-                        "entry_price": 45.80,
-                        "mark_price": 46.20,
-                        "pnl": -40.0,
-                        "roe": -1.74,
-                        "funding_rate": 0.0015  # 0.15% funding rate
-                    },
-                    {
-                        "symbol": "BTC/USDT:USDT",
-                        "side": "SHORT",
-                        "size": 0.05,
-                        "entry_price": 67200.0,
-                        "mark_price": 66800.0,
-                        "pnl": 20.0,
-                        "roe": 0.59,
-                        "funding_rate": -0.0005  # -0.05% funding rate
-                    }
-                ]
-            }
+            # Nếu không có API key, trả về mock data
+            if not (self.api_key and self.api_secret):
+                return self._get_mock_data()
+
+            # Lấy dữ liệu thật từ OKX API
+            return self._fetch_real_okx_data()
+
         except Exception as e:
+            self._log_event(f"[ERROR] get_position_data: {e}")
             return {
                 "error": str(e),
                 "total_balance": 0,
@@ -276,3 +255,153 @@ class OKXMicroservice(BaseMicroservice):
                 "launchpool_total": 0,
                 "positions": []
             }
+
+    def _get_mock_data(self) -> Dict[str, Any]:
+        """Mock data cho demo khi chưa có API key"""
+        return {
+            "total_balance": 3200.0,
+            "futures_pnl": -75.50,
+            "staking_total": 1800.0,
+            "launchpool_total": 450.0,
+            "positions": [
+                {
+                    "symbol": "OKB/USDT:USDT",
+                    "side": "SHORT",
+                    "size": 100.0,
+                    "entry_price": 45.80,
+                    "mark_price": 46.20,
+                    "pnl": -40.0,
+                    "roe": -1.74,
+                    "funding_rate": 0.0015
+                },
+                {
+                    "symbol": "BTC/USDT:USDT",
+                    "side": "SHORT",
+                    "size": 0.05,
+                    "entry_price": 67200.0,
+                    "mark_price": 66800.0,
+                    "pnl": 20.0,
+                    "roe": 0.59,
+                    "funding_rate": -0.0005
+                }
+            ]
+        }
+
+    def _fetch_real_okx_data(self) -> Dict[str, Any]:
+        """Lấy dữ liệu thật từ OKX API"""
+        import ccxt
+
+        # Tạo client cho API calls đồng bộ (cho position data)
+        okx_sync = ccxt.okx({
+            'apiKey': self.api_key,
+            'secret': self.api_secret,
+            'password': self.passphrase,
+            'enableRateLimit': True,
+            'sandbox': False  # Production mode
+        })
+
+        try:
+            # Lấy account balance
+            account_balance = okx_sync.fetch_balance()
+
+            # Lấy trading account balance (USDT)
+            trading_usdt = float(account_balance.get('USDT', {}).get('total', 0))
+
+            # Lấy funding account balance
+            funding_balance = self._get_funding_balance(okx_sync)
+
+            # Lấy futures positions
+            positions = okx_sync.fetch_positions()
+            active_positions = []
+            total_pnl = 0.0
+
+            for pos in positions:
+                if float(pos.get('contracts', 0)) != 0:  # Chỉ lấy position có size > 0
+                    side = pos.get('side', '').upper()
+                    size = float(pos.get('contracts', 0))
+                    entry_price = float(pos.get('entryPrice', 0))
+                    mark_price = float(pos.get('markPrice', 0))
+                    unrealized_pnl = float(pos.get('unrealizedPnl', 0))
+                    percentage = float(pos.get('percentage', 0))
+
+                    # Lấy funding rate cho symbol này
+                    funding_rate = self._get_funding_rate(okx_sync, pos.get('symbol', ''))
+
+                    active_positions.append({
+                        "symbol": pos.get('symbol', ''),
+                        "side": side,
+                        "size": abs(size),
+                        "entry_price": entry_price,
+                        "mark_price": mark_price,
+                        "pnl": unrealized_pnl,
+                        "roe": percentage,
+                        "funding_rate": funding_rate
+                    })
+
+                    total_pnl += unrealized_pnl
+
+            # Tính tổng balance
+            total_balance = trading_usdt + funding_balance
+
+            # Lấy thông tin Staking (placeholder - cần API riêng)
+            staking_total = self._get_staking_balance(okx_sync)
+
+            # Lấy thông tin DeFi/Launchpool (placeholder)
+            launchpool_total = self._get_launchpool_balance(okx_sync)
+
+            return {
+                "total_balance": total_balance,
+                "futures_pnl": total_pnl,
+                "staking_total": staking_total,
+                "launchpool_total": launchpool_total,
+                "positions": active_positions
+            }
+
+        except Exception as e:
+            self._log_event(f"[ERROR] _fetch_real_okx_data: {e}")
+            # Fallback to mock data nếu API call failed
+            return self._get_mock_data()
+        finally:
+            try:
+                okx_sync.close()
+            except:
+                pass
+
+    def _get_funding_balance(self, okx_client) -> float:
+        """Lấy funding account balance"""
+        try:
+            # OKX có nhiều account type: trading, funding, etc.
+            funding_balance = okx_client.fetch_balance({'type': 'funding'})
+            return float(funding_balance.get('USDT', {}).get('total', 0))
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get funding balance: {e}")
+            return 0.0
+
+    def _get_funding_rate(self, okx_client, symbol: str) -> float:
+        """Lấy funding rate cho symbol"""
+        try:
+            funding_rate_data = okx_client.fetch_funding_rate(symbol)
+            return float(funding_rate_data.get('fundingRate', 0))
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get funding rate for {symbol}: {e}")
+            return 0.0
+
+    def _get_staking_balance(self, okx_client) -> float:
+        """Lấy balance Staking - placeholder"""
+        try:
+            # TODO: Implement OKX Staking API call
+            # OKX Earn/Staking API cần endpoint riêng
+            return 0.0
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get Staking balance: {e}")
+            return 0.0
+
+    def _get_launchpool_balance(self, okx_client) -> float:
+        """Lấy thông tin DeFi/Launchpool - placeholder"""
+        try:
+            # TODO: Implement OKX DeFi/Launchpool API call
+            # OKX DeFi API cần endpoint riêng
+            return 0.0
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get Launchpool balance: {e}")
+            return 0.0

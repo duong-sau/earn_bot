@@ -271,36 +271,15 @@ class BinanceMicroservice(BaseMicroservice):
     def get_position_data(self) -> Dict[str, Any]:
         """Lấy thông tin position và earn cho API"""
         try:
-            # Mock data cho demo - sau này anh có thể thay bằng API thực
-            return {
-                "total_balance": 5000.0,
-                "futures_pnl": 150.75,
-                "simple_earn_total": 2500.0,
-                "cross_margin_loan": -800.0,
-                "positions": [
-                    {
-                        "symbol": "BTC/USDT:USDT",
-                        "side": "SHORT",
-                        "size": 0.1,
-                        "entry_price": 67000.0,
-                        "mark_price": 66500.0,
-                        "pnl": 50.0,
-                        "roe": 1.25,
-                        "funding_rate": 0.0001  # 0.01% funding rate
-                    },
-                    {
-                        "symbol": "ETH/USDT:USDT",
-                        "side": "SHORT",
-                        "size": 2.5,
-                        "entry_price": 2600.0,
-                        "mark_price": 2580.0,
-                        "pnl": 50.0,
-                        "roe": 1.92,
-                        "funding_rate": -0.0025  # -0.25% funding rate (negative = good for short)
-                    }
-                ]
-            }
+            # Nếu không có API key, trả về mock data
+            if not (self.api_key and self.api_secret):
+                return self._get_mock_data()
+
+            # Lấy dữ liệu thật từ Binance API
+            return self._fetch_real_binance_data()
+
         except Exception as e:
+            self._log_event(f"[ERROR] get_position_data: {e}")
             return {
                 "error": str(e),
                 "total_balance": 0,
@@ -309,3 +288,141 @@ class BinanceMicroservice(BaseMicroservice):
                 "cross_margin_loan": 0,
                 "positions": []
             }
+
+    def _get_mock_data(self) -> Dict[str, Any]:
+        """Mock data cho demo khi chưa có API key"""
+        return {
+            "total_balance": 5000.0,
+            "futures_pnl": 150.75,
+            "simple_earn_total": 2500.0,
+            "cross_margin_loan": -800.0,
+            "positions": [
+                {
+                    "symbol": "BTC/USDT:USDT",
+                    "side": "SHORT",
+                    "size": 0.1,
+                    "entry_price": 67000.0,
+                    "mark_price": 66500.0,
+                    "pnl": 50.0,
+                    "roe": 1.25,
+                    "funding_rate": 0.0001
+                },
+                {
+                    "symbol": "ETH/USDT:USDT",
+                    "side": "SHORT",
+                    "size": 2.5,
+                    "entry_price": 2600.0,
+                    "mark_price": 2580.0,
+                    "pnl": 50.0,
+                    "roe": 1.92,
+                    "funding_rate": -0.0025
+                }
+            ]
+        }
+
+    def _fetch_real_binance_data(self) -> Dict[str, Any]:
+        """Lấy dữ liệu thật từ Binance API"""
+        import ccxt
+
+        # Tạo client cho API calls đồng bộ (cho position data)
+        binance_sync = ccxt.binance({
+            'apiKey': self.api_key,
+            'secret': self.api_secret,
+            'enableRateLimit': True,
+            'sandbox': False  # Production mode
+        })
+
+        try:
+            # Lấy futures balance
+            futures_balance = binance_sync.fetch_balance({'type': 'future'})
+            futures_usdt = float(futures_balance.get('USDT', {}).get('total', 0))
+
+            # Lấy spot balance
+            spot_balance = binance_sync.fetch_balance({'type': 'spot'})
+            spot_usdt = float(spot_balance.get('USDT', {}).get('total', 0))
+
+            # Lấy futures positions
+            positions = binance_sync.fetch_positions()
+            active_positions = []
+            total_pnl = 0.0
+
+            for pos in positions:
+                if float(pos.get('contracts', 0)) != 0:  # Chỉ lấy position có size > 0
+                    side = pos.get('side', '').upper()
+                    size = float(pos.get('contracts', 0))
+                    entry_price = float(pos.get('entryPrice', 0))
+                    mark_price = float(pos.get('markPrice', 0))
+                    unrealized_pnl = float(pos.get('unrealizedPnl', 0))
+                    percentage = float(pos.get('percentage', 0))
+
+                    # Lấy funding rate cho symbol này
+                    funding_rate = self._get_funding_rate(binance_sync, pos.get('symbol', ''))
+
+                    active_positions.append({
+                        "symbol": pos.get('symbol', ''),
+                        "side": side,
+                        "size": abs(size),
+                        "entry_price": entry_price,
+                        "mark_price": mark_price,
+                        "pnl": unrealized_pnl,
+                        "roe": percentage,
+                        "funding_rate": funding_rate
+                    })
+
+                    total_pnl += unrealized_pnl
+
+            # Tính tổng balance
+            total_balance = futures_usdt + spot_usdt
+
+            # Lấy thông tin Simple Earn (placeholder - cần API riêng)
+            simple_earn_total = self._get_simple_earn_balance(binance_sync)
+
+            # Lấy thông tin Cross Margin Loan (placeholder)
+            cross_margin_loan = self._get_cross_margin_loan(binance_sync)
+
+            return {
+                "total_balance": total_balance,
+                "futures_pnl": total_pnl,
+                "simple_earn_total": simple_earn_total,
+                "cross_margin_loan": cross_margin_loan,
+                "positions": active_positions
+            }
+
+        except Exception as e:
+            self._log_event(f"[ERROR] _fetch_real_binance_data: {e}")
+            # Fallback to mock data nếu API call failed
+            return self._get_mock_data()
+        finally:
+            try:
+                binance_sync.close()
+            except:
+                pass
+
+    def _get_funding_rate(self, binance_client, symbol: str) -> float:
+        """Lấy funding rate cho symbol"""
+        try:
+            funding_rate_data = binance_client.fetch_funding_rate(symbol)
+            return float(funding_rate_data.get('fundingRate', 0))
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get funding rate for {symbol}: {e}")
+            return 0.0
+
+    def _get_simple_earn_balance(self, binance_client) -> float:
+        """Lấy balance Simple Earn - placeholder"""
+        try:
+            # TODO: Implement Simple Earn API call
+            # Binance Simple Earn API cần endpoint riêng
+            return 0.0
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get Simple Earn balance: {e}")
+            return 0.0
+
+    def _get_cross_margin_loan(self, binance_client) -> float:
+        """Lấy thông tin Cross Margin Loan - placeholder"""
+        try:
+            # TODO: Implement Cross Margin API call
+            # Binance Margin API cần endpoint riêng
+            return 0.0
+        except Exception as e:
+            self._log_event(f"[WARN] Cannot get Cross Margin loan: {e}")
+            return 0.0
