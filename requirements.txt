@@ -1,0 +1,17 @@
+# Core web & API
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+Flask>=3.0.0
+APScheduler>=3.10.4
+
+# Exchanges & realtime
+ccxt
+websockets>=12.0
+requests
+
+# Utils
+python-dotenv>=1.0.0
+
+# (Tuỳ chọn) logging cấu trúc
+orjson>=3.10.0

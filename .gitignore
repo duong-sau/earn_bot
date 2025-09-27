@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pdb
+*.so
+*.egg-info/
+.eggs/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+.linux_env/
+env/
+venv/
+
+# Env files
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+
+# SSH keys and secrets (local only)
+_ssh/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.iml
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Node / Frontend (web-ui)
+web-ui/node_modules/
+web-ui/build/
+web-ui/dist/
+web-ui/.cache/
+web-ui/.next/
+
+# Git metadata should NOT be ignored (remove `.git/` if present)
+# .git/
+
+_settings

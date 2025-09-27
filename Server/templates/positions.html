@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Position View - Earn Bot</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .exchange-section {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .exchange-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+        }
+        .exchange-logo {
+            width: 40px;
+            height: 40px;
+            margin-right: 15px;
+            border-radius: 50%;
+        }
+        .binance { background-color: #f3ba2f; }
+        .okx { background-color: #000000; }
+        .bitget { background-color: #00d4aa; }
+
+        .status-online { color: #28a745; }
+        .status-offline { color: #dc3545; }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+        .info-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        .info-card h4 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .info-card .value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .position-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            background: white;
+        }
+        .position-table th,
+        .position-table td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        .position-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        .positive { color: #28a745; }
+        .negative { color: #dc3545; }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .refresh-btn {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        .refresh-btn:hover {
+            background-color: #0056b3;
+        }
+        .back-btn {
+            background-color: #6c757d;
+            color: white;
+            padding: 8px 15px;
+            text-decoration: none;
+            border-radius: 3px;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-btn">← Quay lại Dashboard</a>
+
+    <div class="header">
+        <h1>📊 Position & Earn/Stake Overview</h1>
+        <p>Tổng quan vị thế giao dịch và tài sản earn/stake trên các sàn</p>
+        <button class="refresh-btn" onclick="loadAllData()">🔄 Refresh All</button>
+        <button class="refresh-btn" onclick="toggleAutoRefresh()">⏱️ Auto Refresh: <span id="auto-status">OFF</span></button>
+    </div>
+
+    <!-- Binance Section -->
+    <div class="exchange-section">
+        <div class="exchange-header">
+            <div class="exchange-logo binance"></div>
+            <h2>Binance</h2>
+            <span id="binance-status" class="status-offline">● Offline</span>
+        </div>
+        <div id="binance-content" class="loading">
+            <p>Đang tải dữ liệu Binance...</p>
+        </div>
+    </div>
+
+    <!-- OKX Section -->
+    <div class="exchange-section">
+        <div class="exchange-header">
+            <div class="exchange-logo okx"></div>
+            <h2>OKX</h2>
+            <span id="okx-status" class="status-offline">● Offline</span>
+        </div>
+        <div id="okx-content" class="loading">
+            <p>Đang tải dữ liệu OKX...</p>
+        </div>
+    </div>
+
+    <!-- Bitget Section -->
+    <div class="exchange-section">
+        <div class="exchange-header">
+            <div class="exchange-logo bitget"></div>
+            <h2>Bitget</h2>
+            <span id="bitget-status" class="status-offline">● Offline</span>
+        </div>
+        <div id="bitget-content" class="loading">
+            <p>Đang tải dữ liệu Bitget...</p>
+        </div>
+    </div>
+
+    <div class="timestamp">
+        Cập nhật lần cuối: <span id="last-update">-</span>
+    </div>
+
+    <script>
+        let autoRefreshInterval = null;
+        let isAutoRefresh = false;
+
+        function updateTimestamp() {
+            document.getElementById('last-update').textContent = new Date().toLocaleString('vi-VN');
+        }
+
+        function setStatus(exchange, isOnline) {
+            const statusElement = document.getElementById(`${exchange}-status`);
+            if (isOnline) {
+                statusElement.textContent = '● Online';
+                statusElement.className = 'status-online';
+            } else {
+                statusElement.textContent = '● Offline';
+                statusElement.className = 'status-offline';
+            }
+        }
+
+        function formatCurrency(value) {
+            if (value === null || value === undefined) return 'N/A';
+            return new Intl.NumberFormat('vi-VN', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2
+            }).format(value);
+        }
+
+        function formatNumber(value, decimals = 4) {
+            if (value === null || value === undefined) return 'N/A';
+            return parseFloat(value).toFixed(decimals);
+        }
+
+        function loadBinanceData() {
+            fetch('/api/exchanges/binance/positions')
+                .then(response => response.json())
+                .then(data => {
+                    setStatus('binance', true);
+                    renderBinanceData(data);
+                })
+                .catch(error => {
+                    console.error('Binance error:', error);
+                    setStatus('binance', false);
+                    document.getElementById('binance-content').innerHTML = '<p class="negative">❌ Lỗi kết nối Binance</p>';
+                });
+        }
+
+        function loadOKXData() {
+            fetch('/api/exchanges/okx/positions')
+                .then(response => response.json())
+                .then(data => {
+                    setStatus('okx', true);
+                    renderOKXData(data);
+                })
+                .catch(error => {
+                    console.error('OKX error:', error);
+                    setStatus('okx', false);
+                    document.getElementById('okx-content').innerHTML = '<p class="negative">❌ Lỗi kết nối OKX</p>';
+                });
+        }
+
+        function loadBitgetData() {
+            fetch('/api/exchanges/bitget/positions')
+                .then(response => response.json())
+                .then(data => {
+                    setStatus('bitget', true);
+                    renderBitgetData(data);
+                })
+                .catch(error => {
+                    console.error('Bitget error:', error);
+                    setStatus('bitget', false);
+                    document.getElementById('bitget-content').innerHTML = '<p class="negative">❌ Lỗi kết nối Bitget</p>';
+                });
+        }
+
+        function renderBinanceData(data) {
+            const html = `
+                <div class="info-grid">
+                    <div class="info-card">
+                        <h4>💰 Total Balance</h4>
+                        <div class="value">${formatCurrency(data.total_balance)}</div>
+                    </div>
+                    <div class="info-card">
+                        <h4>📈 Futures PnL</h4>
+                        <div class="value ${data.futures_pnl >= 0 ? 'positive' : 'negative'}">
+                            ${formatCurrency(data.futures_pnl)}
+                        </div>
+                    </div>
+                    <div class="info-card">
+                        <h4>🏦 Simple Earn</h4>
+                        <div class="value">${formatCurrency(data.simple_earn_total)}</div>
+                    </div>
+                    <div class="info-card">
+                        <h4>💳 Cross Margin Loan</h4>
+                        <div class="value negative">${formatCurrency(data.cross_margin_loan)}</div>
+                    </div>
+                </div>
+
+                <h4>📊 Futures Positions</h4>
+                <table class="position-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Size</th>
+                            <th>Entry Price</th>
+                            <th>Mark Price</th>
+                            <th>PnL</th>
+                            <th>ROE%</th>
+                            <th>Funding Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.positions?.map(pos => `
+                            <tr>
+                                <td>${pos.symbol}</td>
+                                <td class="${pos.side.toLowerCase()}">${pos.side}</td>
+                                <td>${formatNumber(pos.size)}</td>
+                                <td>${formatNumber(pos.entry_price)}</td>
+                                <td>${formatNumber(pos.mark_price)}</td>
+                                <td class="${pos.pnl >= 0 ? 'positive' : 'negative'}">
+                                    ${formatCurrency(pos.pnl)}
+                                </td>
+                                <td class="${pos.roe >= 0 ? 'positive' : 'negative'}">
+                                    ${formatNumber(pos.roe, 2)}%
+                                </td>
+                                <td class="${pos.funding_rate >= 0 ? 'negative' : 'positive'}">
+                                    ${formatNumber(pos.funding_rate * 100, 4)}%
+                                </td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="8">Không có position</td></tr>'}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('binance-content').innerHTML = html;
+        }
+
+        function renderOKXData(data) {
+            const html = `
+                <div class="info-grid">
+                    <div class="info-card">
+                        <h4>💰 Total Balance</h4>
+                        <div class="value">${formatCurrency(data.total_balance)}</div>
+                    </div>
+                    <div class="info-card">
+                        <h4>📈 Futures PnL</h4>
+                        <div class="value ${data.futures_pnl >= 0 ? 'positive' : 'negative'}">
+                            ${formatCurrency(data.futures_pnl)}
+                        </div>
+                    </div>
+                    <div class="info-card">
+                        <h4>🎯 Staking</h4>
+                        <div class="value">${formatCurrency(data.staking_total)}</div>
+                    </div>
+                    <div class="info-card">
+                        <h4>🚀 Launchpool</h4>
+                        <div class="value">${formatCurrency(data.launchpool_total)}</div>
+                    </div>
+                </div>
+
+                <h4>📊 Futures Positions</h4>
+                <table class="position-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Size</th>
+                            <th>Entry Price</th>
+                            <th>Mark Price</th>
+                            <th>PnL</th>
+                            <th>ROE%</th>
+                            <th>Funding Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.positions?.map(pos => `
+                            <tr>
+                                <td>${pos.symbol}</td>
+                                <td class="${pos.side.toLowerCase()}">${pos.side}</td>
+                                <td>${formatNumber(pos.size)}</td>
+                                <td>${formatNumber(pos.entry_price)}</td>
+                                <td>${formatNumber(pos.mark_price)}</td>
+                                <td class="${pos.pnl >= 0 ? 'positive' : 'negative'}">
+                                    ${formatCurrency(pos.pnl)}
+                                </td>
+                                <td class="${pos.roe >= 0 ? 'positive' : 'negative'}">
+                                    ${formatNumber(pos.roe, 2)}%
+                                </td>
+                                <td class="${pos.funding_rate >= 0 ? 'negative' : 'positive'}">
+                                    ${formatNumber(pos.funding_rate * 100, 4)}%
+                                </td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="8">Không có position</td></tr>'}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('okx-content').innerHTML = html;
+        }
+
+        function renderBitgetData(data) {
+            const html = `
+                <div class="info-grid">
+                    <div class="info-card">
+                        <h4>💰 Total Balance</h4>
+                        <div class="value">${formatCurrency(data.total_balance)}</div>
+                    </div>
+                    <div class="info-card">
+                        <h4>📈 Futures PnL</h4>
+                        <div class="value ${data.futures_pnl >= 0 ? 'positive' : 'negative'}">
+                            ${formatCurrency(data.futures_pnl)}
+                        </div>
+                    </div>
+                    <div class="info-card">
+                        <h4>🎯 Staking</h4>
+                        <div class="value">${formatCurrency(data.staking_total)}</div>
+                    </div>
+                    <div class="info-card">
+                        <h4>🚀 Launchpool</h4>
+                        <div class="value">${formatCurrency(data.launchpool_total)}</div>
+                    </div>
+                </div>
+
+                <h4>📊 Futures Positions</h4>
+                <table class="position-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Size</th>
+                            <th>Entry Price</th>
+                            <th>Mark Price</th>
+                            <th>PnL</th>
+                            <th>ROE%</th>
+                            <th>Funding Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.positions?.map(pos => `
+                            <tr>
+                                <td>${pos.symbol}</td>
+                                <td class="${pos.side.toLowerCase()}">${pos.side}</td>
+                                <td>${formatNumber(pos.size)}</td>
+                                <td>${formatNumber(pos.entry_price)}</td>
+                                <td>${formatNumber(pos.mark_price)}</td>
+                                <td class="${pos.pnl >= 0 ? 'positive' : 'negative'}">
+                                    ${formatCurrency(pos.pnl)}
+                                </td>
+                                <td class="${pos.roe >= 0 ? 'positive' : 'negative'}">
+                                    ${formatNumber(pos.roe, 2)}%
+                                </td>
+                                <td class="${pos.funding_rate >= 0 ? 'negative' : 'positive'}">
+                                    ${formatNumber(pos.funding_rate * 100, 4)}%
+                                </td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="8">Không có position</td></tr>'}
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('bitget-content').innerHTML = html;
+        }
+
+        function loadAllData() {
+            updateTimestamp();
+            loadBinanceData();
+            loadOKXData();
+            loadBitgetData();
+        }
+
+        function toggleAutoRefresh() {
+            isAutoRefresh = !isAutoRefresh;
+            const statusElement = document.getElementById('auto-status');
+
+            if (isAutoRefresh) {
+                statusElement.textContent = 'ON';
+                statusElement.style.color = '#28a745';
+                autoRefreshInterval = setInterval(loadAllData, 30000); // Refresh every 30 seconds
+            } else {
+                statusElement.textContent = 'OFF';
+                statusElement.style.color = '#dc3545';
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+
+        // Load data when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadAllData();
+        });
+    </script>
+</body>
+</html>

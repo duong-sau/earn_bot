@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Earn Bot Dashboard</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .service { border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px; }
+        .running { background-color: #d4edda; }
+        .stopped { background-color: #f8d7da; }
+        button { margin: 5px; padding: 8px 15px; border: none; border-radius: 3px; cursor: pointer; }
+        .start-btn { background-color: #28a745; color: white; }
+        .stop-btn { background-color: #dc3545; color: white; }
+        .snapshot-btn { background-color: #007bff; color: white; }
+        .info { background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h1>🤖 Earn Bot Dashboard</h1>
+
+    <div class="info">
+        <h3>Thông tin hệ thống</h3>
+        <p>Server đang chạy tại: <strong>{{ request.host }}</strong></p>
+        <p>Thời gian: <strong id="current-time"></strong></p>
+        <button class="snapshot-btn" onclick="takeSnapshot()">📸 Chụp snapshot tài sản</button>
+        <button class="snapshot-btn" onclick="viewHistory()">📊 Xem lịch sử</button>
+        <button class="snapshot-btn" onclick="viewPositions()">📈 Xem Positions</button>
+    </div>
+
+    <h2>Microservices</h2>
+    {% for service in services %}
+    <div class="service {{ 'running' if service.running else 'stopped' }}">
+        <h3>{{ service.name }}</h3>
+        <p>Trạng thái: <strong>{{ 'Đang chạy' if service.running else 'Đã dừng' }}</strong></p>
+        <p>Được bật: {{ 'Có' if service.enabled else 'Không' }}</p>
+
+        {% if service.running %}
+            <button class="stop-btn" onclick="controlService('{{ service.name }}', 'stop')">⏹️ Dừng</button>
+        {% else %}
+            <button class="start-btn" onclick="controlService('{{ service.name }}', 'start')">▶️ Khởi động</button>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    <script>
+        function updateTime() {
+            document.getElementById('current-time').textContent = new Date().toLocaleString('vi-VN');
+        }
+
+        function controlService(name, action) {
+            fetch(`/api/services/${name}/${action}`, {method: 'POST'})
+                .then(r => r.json())
+                .then data => {
+                    alert(`${action === 'start' ? 'Khởi động' : 'Dừng'} service ${name}: ${data.status || data.error}`);
+                    location.reload();
+                })
+                .catch(e => alert('Lỗi: ' + e));
+        }
+
+        function takeSnapshot() {
+            fetch('/api/asset/snapshot', {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    alert(`Snapshot thành công!\nTổng tài sản: ${data.total_usdt || 'N/A'} USDT`);
+                })
+                .catch(e => alert('Lỗi: ' + e));
+        }
+
+        function viewHistory() {
+            window.open('/history', '_blank');
+        }
+
+        function viewPositions() {
+            window.open('/positions', '_blank');
+        }
+
+        updateTime();
+        setInterval(updateTime, 1000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+version: '3.9'
+services:
+  binance:
+    build: .
+    container_name: earn_binance_ms
+    environment:
+      SERVICE: binance
+      PYTHONUNBUFFERED: '1'
+    volumes:
+      - ./logs:/app/logs
+      - ./_settings:/app/_settings:ro
+    restart: unless-stopped
+
+  okx:
+    build: .
+    container_name: earn_okx_ms
+    environment:
+      SERVICE: okx
+      PYTHONUNBUFFERED: '1'
+    volumes:
+      - ./logs:/app/logs
+      - ./_settings:/app/_settings:ro
+    restart: unless-stopped
+
+  bitget:
+    build: .
+    container_name: earn_bitget_ms
+    environment:
+      SERVICE: bitget
+      PYTHONUNBUFFERED: '1'
+    volumes:
+      - ./logs:/app/logs
+      - ./_settings:/app/_settings:ro
+    restart: unless-stopped
+
+# Chạy: docker compose up -d --build
+# Dừng: docker compose down
+

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Asset History - Earn Bot</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .back-btn { background-color: #6c757d; color: white; padding: 8px 15px; text-decoration: none; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>📊 Lịch sử Tài sản</h1>
+    <a href="/" class="back-btn">← Quay lại Dashboard</a>
+
+    <div id="history-content">
+        <p>Đang tải...</p>
+    </div>
+
+    <script>
+        fetch('/api/asset/history?limit=50')
+            .then(r => r.json())
+            .then(data => {
+                let html = '<table><thead><tr><th>Thời gian</th><th>Tổng USDT</th><th>Chi tiết</th></tr></thead><tbody>';
+
+                if (data.length === 0) {
+                    html += '<tr><td colspan="3">Chưa có dữ liệu</td></tr>';
+                } else {
+                    data.forEach(item => {
+                        html += `<tr>
+                            <td>${new Date(item.timestamp).toLocaleString('vi-VN')}</td>
+                            <td>${item.total_usdt || 'N/A'}</td>
+                            <td><pre>${JSON.stringify(item, null, 2)}</pre></td>
+                        </tr>`;
+                    });
+                }
+
+                html += '</tbody></table>';
+                document.getElementById('history-content').innerHTML = html;
+            })
+            .catch(e => {
+                document.getElementById('history-content').innerHTML = '<p>Lỗi tải dữ liệu: ' + e + '</p>';
+            });
+    </script>
+</body>
+</html>
