@@ -50,7 +50,7 @@
         function controlService(name, action) {
             fetch(`/api/services/${name}/${action}`, {method: 'POST'})
                 .then(r => r.json())
-                .then data => {
+                .then(data => {
                     alert(`${action === 'start' ? 'Khởi động' : 'Dừng'} service ${name}: ${data.status || data.error}`);
                     location.reload();
                 })
